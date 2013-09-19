@@ -1,0 +1,12 @@
+{{ define "content" }}
+<h2>These petitions are still waiting for a response:</h2>
+<hr />
+{{range .Petitions}}
+    <h3><a href="{{.Url}}">{{ .Title }}</a> {{ addCommas .SignatureCount }} signatures <small>Threshold: {{addCommas .SignatureThreshold}}</small></h3>
+	<h4>Waiting for a response since {{ .DeadlineTime.Format "Jan 2, 2006" }}
+		{{if .YearAgo }} <span class="label label-danger">over a year old</span> {{end}}
+	</h4>
+	<p>{{.Body}}</p>
+	<hr />
+{{end}}
+{{ end }}

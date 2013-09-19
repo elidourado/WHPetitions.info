@@ -1,0 +1,7 @@
+cron:
+- description: update pending petitions
+  url: /updatePending
+  schedule: every 60 minutes
+- description: update responded petitions
+  url: /updateResponded
+  schedule: every 60 minutes

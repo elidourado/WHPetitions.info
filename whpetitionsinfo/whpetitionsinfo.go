@@ -36,8 +36,13 @@ type APIResponse struct {
 	Results []Petition
 }
 
+type UnrespondedAPIResponse struct {
+	Results []UnrespondedPetition
+}
+
 type Petition struct {
-	Id, Title, Url, Status                                                  string
+//	Id string
+	Title, Url, Status                                                  string
 	Body                                                                    string `datastore:",noindex"`
 	SignatureThreshold, SignatureCount, SignaturesNeeded, Deadline, Created int
 	Response                                                                WHResponse
@@ -45,11 +50,25 @@ type Petition struct {
 	YearAgo                                                                 bool
 }
 
+type UnrespondedPetition struct {
+//	Id string
+	Title, Url, Status                                                  string
+	Body                                                                    string `datastore:",noindex"`
+	SignatureThreshold, SignatureCount, SignaturesNeeded, Deadline, Created int
+//	Response                                                                WHResponse
+	DeadlineTime, UpdatedTime                                               time.Time
+	YearAgo                                                                 bool
+}
+
 type WHResponse struct {
-	Id, Url, AssociationTime string
+//	Id string
+	Url string
+	AssociationTime int
 }
 
 type PetitionSet []Petition
+type UnrespondedPetitionSet []UnrespondedPetition
+
 
 func init() {
 	http.HandleFunc("/", mainHandler)
@@ -186,7 +205,7 @@ func mainHandler(w http.ResponseWriter, r *http.Request) {
 func pendingHandler(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
 	url := "https://api.whitehouse.gov/v1/petitions.json?status=pending%20response&limit=500"
-	response, err := getJSON(url, r)
+	response, err := getUnrespondedJSON(url, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -197,7 +216,7 @@ func pendingHandler(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	petitions := response.Results
 	stats.Number = len(petitions)
-	sort.Sort(PetitionSet(petitions))
+	sort.Sort(UnrespondedPetitionSet(petitions))
 	for item := range petitions {
 		petitions[item].DeadlineTime = time.Unix(int64(petitions[item].Deadline), 0)
 		petitions[item].UpdatedTime = now
@@ -212,7 +231,11 @@ func pendingHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err3.Error(), http.StatusInternalServerError)
 		return
 	}
-	stats.AverageDuration = time.Duration(float64(total) / float64(stats.Number))
+	if(stats.Number)>0 {
+		stats.AverageDuration = time.Duration(float64(total) / float64(stats.Number))
+	} else {
+		stats.AverageDuration = 0
+	}
 	_, err4 := datastore.Put(c, datastore.NewKey(c, "Stats", "pending response", 0, nil), &stats)
 	if err4 != nil {
 		http.Error(w, err4.Error(), http.StatusInternalServerError)
@@ -237,12 +260,13 @@ func respondedHandler(w http.ResponseWriter, r *http.Request) {
 	totalNumber := stats.Number
 	var total float64 = 0
 	for i := range petitions {
-		replyTime, err5 := strconv.ParseInt(petitions[i].Response.AssociationTime, 10, 64)
-		if err5 == nil {
-			total += float64(replyTime) - float64(petitions[i].Deadline)
-		} else {
-			totalNumber -= 1
-		}
+		// replyTime, err5 := strconv.ParseInt(petitions[i].Response.AssociationTime, 10, 64)
+		// if err5 == nil {
+		// 	total += float64(replyTime) - float64(petitions[i].Deadline)
+		// } else {
+		// 	totalNumber -= 1
+		// }
+		total += float64(petitions[i].Response.AssociationTime) - float64(petitions[i].Deadline)
 	}
 	average := total / float64(totalNumber)
 	stats.AverageDuration = time.Duration(average * 1e9)
@@ -256,6 +280,35 @@ func respondedHandler(w http.ResponseWriter, r *http.Request) {
 	OTHER FUNCTIONS
 
 */
+
+func getUnrespondedJSON(url string, r *http.Request) (UnrespondedAPIResponse, error) {
+	c := appengine.NewContext(r)
+
+	transport := urlfetch.Transport{
+		Context:                       c,
+		Deadline:                      time.Duration(20) * time.Second,
+		AllowInvalidServerCertificate: false,
+	}
+	req, err0 := http.NewRequest("GET", url, nil)
+	if err0 != nil {
+		return UnrespondedAPIResponse{}, err0
+	}
+	resp, err1 := transport.RoundTrip(req)
+	if err1 != nil {
+		return UnrespondedAPIResponse{}, err1
+	}
+	body, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return UnrespondedAPIResponse{}, err2
+	}
+	resp.Body.Close()
+	var f UnrespondedAPIResponse
+	err3 := json.Unmarshal(body, &f)
+	if err3 != nil {
+		return UnrespondedAPIResponse{}, err3
+	}
+	return f, nil
+}
 
 func getJSON(url string, r *http.Request) (APIResponse, error) {
 	c := appengine.NewContext(r)
@@ -318,5 +371,16 @@ func (s PetitionSet) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
 func (s PetitionSet) Less(i, j int) bool {
+	return s[i].Deadline < s[j].Deadline
+}
+
+
+func (s UnrespondedPetitionSet) Len() int {
+	return len(s)
+}
+func (s UnrespondedPetitionSet) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s UnrespondedPetitionSet) Less(i, j int) bool {
 	return s[i].Deadline < s[j].Deadline
 }
